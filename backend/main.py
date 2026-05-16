@@ -241,8 +241,9 @@ async def trigger_collector():
             gh_cfg = cfg.get("google_home", {})
             device_ip = gh_cfg.get("device_ip", "")
             language = gh_cfg.get("tts_language", "en")
-            announce_summary_on_trigger = bool(
-                gh_cfg.get("announce_summary_on_trigger", True)
+            announce_summary_on_trigger = gh_cfg.get(
+                "announce_summary_on_trigger",
+                True,
             )
 
             if anomaly.is_anomaly:
