@@ -352,6 +352,7 @@ async def test_summary_no_auth_when_key_not_configured(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_summary_missing_api_key_returns_403(client: AsyncClient):
+    """Verify a 403 response is returned when the API key is required but the header is absent."""
     os.environ["VANGUARD_API_KEY"] = "secret123"
     resp = await client.get("/api/summary/latest")
     assert resp.status_code == 403
@@ -359,6 +360,7 @@ async def test_summary_missing_api_key_returns_403(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_summary_wrong_api_key_returns_403(client: AsyncClient):
+    """Verify a 403 response is returned when the API key is required but an incorrect value is provided."""
     os.environ["VANGUARD_API_KEY"] = "secret123"
     resp = await client.get("/api/summary/latest", headers={"x-api-key": "wrong"})
     assert resp.status_code == 403

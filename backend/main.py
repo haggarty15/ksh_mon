@@ -28,7 +28,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.anomaly import detect_anomalies
+from backend.anomaly import AnomalyResult, detect_anomalies
 from backend.database import (
     get_24h_summary,
     get_available_dates,
@@ -310,7 +310,7 @@ async def get_latest_summary():
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_spoken_summary(anomaly) -> str:
+def _build_spoken_summary(anomaly: AnomalyResult) -> str:
     """Format an AnomalyResult into a short spoken sentence."""
     parts: list[str] = []
     if anomaly.new_ips:
