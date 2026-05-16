@@ -1,0 +1,258 @@
+version: 1
+sampling:
+  interval_seconds: 5
+  evaluation_window_seconds: 60
+
+alerting:
+  severities: [info, warn, critical]
+  default_dedup_seconds: 120
+  default_cooldown_seconds: 300
+
+monitors:
+  cpu:
+    - id: cpu_sustained_high
+      metric: cpu.per_core_usage_percent
+      condition: "any_core_gt"
+      threshold: 90
+      duration_seconds: 120
+      severity: warn
+      dedup_seconds: 120
+      cooldown_seconds: 300
+    - id: cpu_high_load_high_temp
+      metric: cpu.compound_load_temp
+      condition: "usage_gt_and_temp_gt"
+      usage_threshold: 85
+      temperature_celsius_threshold: 90
+      duration_seconds: 60
+      severity: critical
+      dedup_seconds: 120
+      cooldown_seconds: 600
+    - id: cpu_thermal_throttling
+      metric: cpu.thermal_throttling
+      condition: "is_true"
+      severity: critical
+
+  gpu:
+    - id: gpu_vram_pressure
+      metric: gpu.vram_usage_percent
+      condition: "gt"
+      threshold: 92
+      duration_seconds: 45
+      severity: warn
+    - id: gpu_thermal_throttle
+      metric: gpu.thermal_throttling
+      condition: "is_true"
+      severity: critical
+    - id: gpu_driver_reset
+      metric: gpu.driver_reset_event
+      condition: "count_gte"
+      threshold: 1
+      window_seconds: 300
+      severity: critical
+
+  memory:
+    - id: ram_pressure
+      metric: memory.ram_usage_percent
+      condition: "gt"
+      threshold: 90
+      duration_seconds: 60
+      severity: warn
+    - id: ram_hard_fault_surge
+      metric: memory.hard_page_faults_per_sec
+      condition: "gt"
+      threshold: 200
+      duration_seconds: 30
+      severity: warn
+    - id: ram_pre_stutter_compound
+      metric: memory.compound_pressure_faults
+      condition: "ram_gt_and_faults_rising"
+      ram_threshold: 88
+      faults_per_sec_threshold: 150
+      duration_seconds: 45
+      severity: critical
+
+  disk:
+    - id: disk_latency_high
+      metric: disk.latency_ms
+      condition: "gt"
+      threshold: 30
+      duration_seconds: 60
+      severity: warn
+    - id: disk_queue_saturation
+      metric: disk.queue_length
+      condition: "gt"
+      threshold: 3
+      duration_seconds: 45
+      severity: warn
+    - id: disk_free_space_low
+      metric: disk.free_space_percent
+      condition: "lt"
+      threshold: 10
+      duration_seconds: 60
+      severity: critical
+    - id: disk_smart_failure
+      metric: disk.smart_health
+      condition: "not_equals"
+      threshold: healthy
+      severity: critical
+
+  network:
+    - id: game_ping_high
+      metric: network.ping_ms
+      condition: "gt"
+      threshold: 100
+      duration_seconds: 30
+      severity: warn
+    - id: game_jitter_burst
+      metric: network.jitter_ms
+      condition: "gt"
+      threshold: 25
+      duration_seconds: 20
+      severity: warn
+    - id: packet_loss_burst
+      metric: network.packet_loss_percent
+      condition: "gt"
+      threshold: 2
+      duration_seconds: 20
+      severity: critical
+    - id: dns_latency_high
+      metric: network.dns_latency_ms
+      condition: "gt"
+      threshold: 150
+      duration_seconds: 30
+      severity: warn
+    - id: dns_resolution_failure
+      metric: network.dns_failure_count
+      condition: "count_gte"
+      threshold: 3
+      window_seconds: 300
+      severity: critical
+
+  process:
+    - id: game_process_down
+      metric: process.game_running
+      condition: "is_false"
+      severity: critical
+    - id: game_crash_loop
+      metric: process.game_crash_count
+      condition: "count_gte"
+      threshold: 2
+      window_seconds: 600
+      severity: critical
+    - id: frame_time_spike
+      metric: process.frame_time_p99_ms
+      condition: "gt"
+      threshold: 35
+      duration_seconds: 30
+      severity: warn
+
+  os_integrity:
+    - id: critical_system_event
+      metric: os.critical_event_count
+      condition: "count_gte"
+      threshold: 1
+      window_seconds: 300
+      severity: critical
+    - id: service_restart_loop
+      metric: os.service_restart_count
+      condition: "count_gte"
+      threshold: 3
+      window_seconds: 600
+      severity: warn
+
+  power_hardware:
+    - id: unexpected_reboot
+      metric: power.unexpected_reboot_count
+      condition: "count_gte"
+      threshold: 1
+      window_seconds: 86400
+      severity: critical
+    - id: battery_health_low
+      metric: power.battery_health_percent
+      condition: "lt"
+      threshold: 70
+      severity: warn
+
+  peripherals:
+    - id: usb_flap_storm
+      metric: peripherals.usb_disconnect_count
+      condition: "count_gte"
+      threshold: 5
+      window_seconds: 600
+      severity: warn
+    - id: audio_dropout_storm
+      metric: peripherals.audio_dropout_count
+      condition: "count_gte"
+      threshold: 3
+      window_seconds: 600
+      severity: warn
+
+  remote_access:
+    - id: vpn_tunnel_down
+      metric: remote.vpn_tunnel_up
+      condition: "is_false"
+      severity: critical
+    - id: vpn_latency_high
+      metric: remote.vpn_latency_ms
+      condition: "gt"
+      threshold: 200
+      duration_seconds: 30
+      severity: warn
+    - id: mesh_node_unreachable
+      metric: remote.mesh_reachability_percent
+      condition: "lt"
+      threshold: 80
+      duration_seconds: 60
+      severity: warn
+    - id: remote_auth_failures
+      metric: remote.auth_failure_count
+      condition: "count_gte"
+      threshold: 5
+      window_seconds: 900
+      severity: critical
+
+  security:
+    - id: login_fail_burst
+      metric: security.failed_login_count
+      condition: "count_gte"
+      threshold: 10
+      window_seconds: 600
+      severity: critical
+    - id: firewall_block_surge
+      metric: security.firewall_block_count
+      condition: "count_gte"
+      threshold: 30
+      window_seconds: 600
+      severity: warn
+    - id: new_listening_port_detected
+      metric: security.new_listening_port_count
+      condition: "count_gte"
+      threshold: 1
+      window_seconds: 600
+      severity: warn
+
+compound_alerts:
+  - id: likely_thermal_stutter
+    when:
+      - cpu_high_load_high_temp
+      - frame_time_spike
+    within_seconds: 120
+    severity: critical
+    dedup_seconds: 300
+    cooldown_seconds: 900
+  - id: likely_network_instability
+    when:
+      - game_jitter_burst
+      - packet_loss_burst
+    within_seconds: 60
+    severity: critical
+    dedup_seconds: 300
+    cooldown_seconds: 900
+  - id: likely_remote_access_instability
+    when:
+      - vpn_tunnel_down
+      - mesh_node_unreachable
+    within_seconds: 180
+    severity: critical
+    dedup_seconds: 300
+    cooldown_seconds: 900

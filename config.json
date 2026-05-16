@@ -20,6 +20,7 @@
   },
   "google_home": {
     "device_ip": "",
-    "tts_language": "en"
+    "tts_language": "en",
+    "announce_summary_on_trigger": true
   }
 }

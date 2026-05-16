@@ -1,0 +1,44 @@
+version: 1
+
+targets:
+  game_endpoints:
+    - name: valorant-us-central
+      # RFC 5737 TEST-NET-2 documentation IP; replace with your real game endpoint.
+      host: 198.51.100.10
+      protocol: icmp
+      interval_seconds: 5
+    - name: steam-cdn
+      host: cdn.cloudflare.steamstatic.com
+      protocol: dns+tcp
+      interval_seconds: 10
+
+  dns_resolvers:
+    - name: cloudflare
+      host: 1.1.1.1
+      interval_seconds: 10
+    - name: google
+      host: 8.8.8.8
+      interval_seconds: 10
+
+  remote_access:
+    vpn:
+      provider: nordvpn-meshnet
+      tunnel_name: ksh-meshnet
+      interval_seconds: 10
+      latency_probe_target: 1.1.1.1
+    remote_sessions:
+      - name: primary-remote-session
+        expected_state: connected
+        interval_seconds: 15
+    mesh_nodes:
+      - name: gaming-laptop
+        address: 192.168.50.10
+        protocol: icmp
+        interval_seconds: 10
+      - name: home-server
+        address: 192.168.50.20
+        protocol: icmp
+        interval_seconds: 10
+
+metadata:
+  note: Replace example endpoints with real game servers, DNS targets, and mesh node addresses.
