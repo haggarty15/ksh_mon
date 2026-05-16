@@ -146,21 +146,27 @@ async def test_ingest_multiple_types(client: AsyncClient):
 async def test_ingest_requires_api_key_when_configured(client: AsyncClient):
     """When an API key is configured, /api/ingest must reject requests without it."""
     os.environ["VANGUARD_API_KEY"] = "secret123"
-    resp = await client.post("/api/ingest", json=SAMPLE_PAYLOAD)
-    assert resp.status_code == 403
+    try:
+        resp = await client.post("/api/ingest", json=SAMPLE_PAYLOAD)
+        assert resp.status_code == 403
+    finally:
+        os.environ.pop("VANGUARD_API_KEY", None)
 
 
 @pytest.mark.asyncio
 async def test_ingest_passes_with_correct_api_key(client: AsyncClient):
     """Correct x-api-key header allows ingest when a key is configured."""
     os.environ["VANGUARD_API_KEY"] = "secret123"
-    resp = await client.post(
-        "/api/ingest",
-        json=SAMPLE_PAYLOAD,
-        headers={"x-api-key": "secret123"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["inserted"] == 1
+    try:
+        resp = await client.post(
+            "/api/ingest",
+            json=SAMPLE_PAYLOAD,
+            headers={"x-api-key": "secret123"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["inserted"] == 1
+    finally:
+        os.environ.pop("VANGUARD_API_KEY", None)
 
 
 # ---------------------------------------------------------------------------
