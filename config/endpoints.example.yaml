@@ -3,6 +3,7 @@ version: 1
 targets:
   game_endpoints:
     - name: valorant-us-central
+      # RFC 5737 TEST-NET-2 documentation IP; replace with your real game endpoint.
       host: 198.51.100.10
       protocol: icmp
       interval_seconds: 5
@@ -31,11 +32,11 @@ targets:
         interval_seconds: 15
     mesh_nodes:
       - name: gaming-laptop
-        address: 100.64.0.10
+        address: 192.168.50.10
         protocol: icmp
         interval_seconds: 10
       - name: home-server
-        address: 100.64.0.20
+        address: 192.168.50.20
         protocol: icmp
         interval_seconds: 10
 
