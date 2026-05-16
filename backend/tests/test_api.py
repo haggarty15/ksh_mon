@@ -57,10 +57,31 @@ async def _init_test_db():
     yield
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _clear_api_key_env():
+    """Ensure no leftover API key env var bleeds between tests."""
+    os.environ.pop("VANGUARD_API_KEY", None)
+    yield
+    os.environ.pop("VANGUARD_API_KEY", None)
+
+
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def authed_client() -> AsyncGenerator[AsyncClient, None]:
+    """Client pre-configured with the test API key header."""
+    os.environ["VANGUARD_API_KEY"] = "test-secret"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"x-api-key": "test-secret"},
+    ) as ac:
         yield ac
 
 
@@ -278,6 +299,118 @@ async def test_get_counts_filtered_by_date(client: AsyncClient):
 
 
 # ---------------------------------------------------------------------------
+# Tests – /api/trigger auth
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_trigger_no_auth_when_key_not_configured(client: AsyncClient):
+    """When api_key is empty, /api/trigger should not require auth."""
+    # Ensure no key is set
+    os.environ.pop("VANGUARD_API_KEY", None)
+    # The endpoint will fail with 404/500 because PowerShell isn't available,
+    # but it must NOT return 403.
+    resp = await client.post("/api/trigger")
+    assert resp.status_code != 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_missing_api_key_returns_403(client: AsyncClient):
+    """Missing x-api-key header returns 403 when a key is configured."""
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.post("/api/trigger")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_wrong_api_key_returns_403(client: AsyncClient):
+    """Wrong x-api-key header returns 403."""
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.post("/api/trigger", headers={"x-api-key": "wrong"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_correct_api_key_passes_auth(client: AsyncClient):
+    """Correct x-api-key header passes auth (may still fail for other reasons)."""
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.post("/api/trigger", headers={"x-api-key": "secret123"})
+    # 403 must not be returned; 404/500/504 is acceptable in a test environment
+    assert resp.status_code != 403
+
+
+# ---------------------------------------------------------------------------
+# Tests – /api/summary/latest
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_summary_no_auth_when_key_not_configured(client: AsyncClient):
+    """When api_key is empty, /api/summary/latest should not require auth."""
+    os.environ.pop("VANGUARD_API_KEY", None)
+    resp = await client.get("/api/summary/latest")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_summary_missing_api_key_returns_403(client: AsyncClient):
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.get("/api/summary/latest")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_summary_wrong_api_key_returns_403(client: AsyncClient):
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.get("/api/summary/latest", headers={"x-api-key": "wrong"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_summary_empty_db(authed_client: AsyncClient):
+    resp = await authed_client.get("/api/summary/latest")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["network_count"] == 0
+    assert body["new_ip_count"] == 0
+    assert body["crash_count"] == 0
+    assert "plain_text" in body
+    assert "as_of" in body
+
+
+@pytest.mark.asyncio
+async def test_summary_plain_text_format(authed_client: AsyncClient):
+    """plain_text must contain key phrase and counts."""
+    # Insert a network event with timestamp = now (last 24h)
+    import datetime
+    now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    events = [
+        {
+            "event_type": "network",
+            "timestamp": now_ts,
+            "remote_ip": "5.5.5.5",
+            "remote_port": "443",
+            "source": "test",
+        },
+        {
+            "event_type": "crash",
+            "timestamp": now_ts,
+            "source": "test",
+            "message": "explorer.exe crash",
+        },
+    ]
+    await authed_client.post("/api/ingest", json={"events": events})
+
+    resp = await authed_client.get("/api/summary/latest")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["network_count"] == 1
+    assert body["crash_count"] == 1
+    text = body["plain_text"]
+    assert text.startswith("Vanguard report:")
+    assert "1 network connection" in text
+    assert "1 crash detected" in text
+
+
+# ---------------------------------------------------------------------------
 # Tests – database helpers
 # ---------------------------------------------------------------------------
 
@@ -300,3 +433,103 @@ async def test_query_events_returns_dict():
     assert len(rows) == 1
     assert isinstance(rows[0], dict)
     assert rows[0]["event_type"] == "driver"
+
+
+@pytest.mark.asyncio
+async def test_get_24h_summary_empty():
+    summary = await db_module.get_24h_summary(db_path=Path(_TMP_DB))
+    assert summary["network_count"] == 0
+    assert summary["unique_ips"] == []
+    assert summary["crash_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_24h_summary_counts():
+    import datetime
+    now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    events = [
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": now_ts, "remote_ip": "1.1.1.1"},
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": now_ts, "remote_ip": "2.2.2.2"},
+        {**SAMPLE_EVENT, "event_type": "crash", "timestamp": now_ts},
+    ]
+    await db_module.insert_events(events, db_path=Path(_TMP_DB))
+    summary = await db_module.get_24h_summary(db_path=Path(_TMP_DB))
+    assert summary["network_count"] == 2
+    assert summary["crash_count"] == 1
+    assert set(summary["unique_ips"]) == {"1.1.1.1", "2.2.2.2"}
+
+
+@pytest.mark.asyncio
+async def test_get_baseline_ips_excludes_today():
+    """IPs from today should not appear in the baseline."""
+    import datetime
+    now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    old_ts = "2020-01-01T00:00:00+00:00"
+    events = [
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": now_ts, "remote_ip": "today.ip"},
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": old_ts, "remote_ip": "old.ip"},
+    ]
+    await db_module.insert_events(events, db_path=Path(_TMP_DB))
+    baseline = await db_module.get_baseline_ips(days_back=3650, db_path=Path(_TMP_DB))
+    assert "old.ip" in baseline
+    assert "today.ip" not in baseline
+
+
+# ---------------------------------------------------------------------------
+# Tests – anomaly detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_detect_anomalies_no_anomaly():
+    from backend.anomaly import detect_anomalies
+    cfg = {"anomaly": {"new_ip_threshold": 1, "connection_count_threshold": 50, "alert_on_crash": True, "baseline_days_back": 7}}
+    result = await detect_anomalies(cfg, db_path=Path(_TMP_DB))
+    assert not result.is_anomaly
+    assert result.new_ips == []
+    assert result.crash_count == 0
+
+
+@pytest.mark.asyncio
+async def test_detect_anomalies_new_ip_flagged():
+    from backend.anomaly import detect_anomalies
+    import datetime
+    now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    events = [
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": now_ts, "remote_ip": "9.9.9.9"},
+    ]
+    await db_module.insert_events(events, db_path=Path(_TMP_DB))
+    cfg = {"anomaly": {"new_ip_threshold": 1, "connection_count_threshold": 50, "alert_on_crash": True, "baseline_days_back": 7}}
+    result = await detect_anomalies(cfg, db_path=Path(_TMP_DB))
+    assert result.is_anomaly
+    assert "9.9.9.9" in result.new_ips
+
+
+@pytest.mark.asyncio
+async def test_detect_anomalies_crash_flagged():
+    from backend.anomaly import detect_anomalies
+    import datetime
+    now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    events = [{**SAMPLE_EVENT, "event_type": "crash", "timestamp": now_ts}]
+    await db_module.insert_events(events, db_path=Path(_TMP_DB))
+    cfg = {"anomaly": {"new_ip_threshold": 1, "connection_count_threshold": 50, "alert_on_crash": True, "baseline_days_back": 7}}
+    result = await detect_anomalies(cfg, db_path=Path(_TMP_DB))
+    assert result.is_anomaly
+    assert result.crash_count == 1
+
+
+@pytest.mark.asyncio
+async def test_detect_anomalies_known_ip_not_flagged():
+    """An IP that appears in baseline should NOT trigger a new-IP anomaly."""
+    from backend.anomaly import detect_anomalies
+    import datetime
+    now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    old_ts = "2020-01-01T00:00:00+00:00"
+    events = [
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": old_ts, "remote_ip": "known.ip"},
+        {**SAMPLE_EVENT, "event_type": "network", "timestamp": now_ts, "remote_ip": "known.ip"},
+    ]
+    await db_module.insert_events(events, db_path=Path(_TMP_DB))
+    cfg = {"anomaly": {"new_ip_threshold": 1, "connection_count_threshold": 50, "alert_on_crash": False, "baseline_days_back": 3650}}
+    result = await detect_anomalies(cfg, db_path=Path(_TMP_DB))
+    assert not result.is_anomaly
+    assert result.new_ips == []

@@ -185,3 +185,68 @@ async def get_event_counts_by_type(
         async with db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
     return {row[0]: row[1] for row in rows}
+
+
+async def get_24h_summary(db_path: Path | None = None) -> dict[str, Any]:
+    """
+    Return aggregated stats for the last 24 hours.
+
+    Keys: network_count, unique_ips (list[str]), crash_count, error_count, driver_count.
+    """
+    path = db_path or await get_db_path()
+
+    async with aiosqlite.connect(path) as db:
+        # Event-type counts in the last 24 hours
+        async with db.execute(
+            """
+            SELECT event_type, COUNT(*) AS cnt
+            FROM events
+            WHERE timestamp >= datetime('now', '-1 day')
+            GROUP BY event_type
+            """
+        ) as cursor:
+            type_counts = {row[0]: row[1] for row in await cursor.fetchall()}
+
+        # Distinct remote IPs from network events in the last 24 hours
+        async with db.execute(
+            """
+            SELECT DISTINCT json_extract(extra, '$.remote_ip') AS ip
+            FROM events
+            WHERE event_type = 'network'
+              AND timestamp >= datetime('now', '-1 day')
+              AND json_extract(extra, '$.remote_ip') IS NOT NULL
+            """
+        ) as cursor:
+            unique_ips = [row[0] for row in await cursor.fetchall() if row[0]]
+
+    return {
+        "network_count": type_counts.get("network", 0),
+        "unique_ips": unique_ips,
+        "crash_count": type_counts.get("crash", 0),
+        "error_count": type_counts.get("error", 0),
+        "driver_count": type_counts.get("driver", 0),
+    }
+
+
+async def get_baseline_ips(days_back: int = 7, db_path: Path | None = None) -> set[str]:
+    """
+    Return the set of distinct remote IPs seen in network events from the last
+    *days_back* days, excluding today.  Used as the anomaly-detection baseline.
+    """
+    path = db_path or await get_db_path()
+
+    async with aiosqlite.connect(path) as db:
+        async with db.execute(
+            """
+            SELECT DISTINCT json_extract(extra, '$.remote_ip') AS ip
+            FROM events
+            WHERE event_type = 'network'
+              AND date(timestamp) < date('now')
+              AND timestamp >= datetime('now', :offset)
+              AND json_extract(extra, '$.remote_ip') IS NOT NULL
+            """,
+            {"offset": f"-{days_back} days"},
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    return {row[0] for row in rows if row[0]}

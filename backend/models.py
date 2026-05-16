@@ -72,3 +72,13 @@ class TriggerResponse(BaseModel):
     message: str
     stdout: str = ""
     stderr: str = ""
+    anomaly_detected: bool = False
+    anomaly_summary: str = ""
+
+
+class SummaryResponse(BaseModel):
+    plain_text: str
+    network_count: int
+    new_ip_count: int
+    crash_count: int
+    as_of: str
