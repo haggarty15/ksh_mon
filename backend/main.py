@@ -136,7 +136,8 @@ async def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
 # API routes
 # ---------------------------------------------------------------------------
 
-@app.post("/api/ingest", summary="Ingest events from PowerShell collector")
+@app.post("/api/ingest", summary="Ingest events from PowerShell collector",
+          dependencies=[Depends(verify_api_key)])
 async def ingest(payload: IngestPayload):
     events = [ev.to_flat_dict() for ev in payload.events]
     count = await insert_events(events)
@@ -189,7 +190,21 @@ async def trigger_collector():
     After a successful collection, anomaly detection runs automatically; if
     an anomaly is found and a Google Home device IP is configured, the summary
     is spoken aloud via TTS.
+
+    **Disabled in cloud mode** (``CLOUD_MODE=1``).  In that configuration the
+    collector script runs on the Windows machine and POSTs directly to
+    ``/api/ingest``.  Use that endpoint instead.
     """
+    if os.environ.get("CLOUD_MODE", "").lower() in ("1", "true", "yes"):
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "The /api/trigger endpoint is disabled in cloud mode. "
+                "Run collect.ps1 on your Windows machine with -ApiBaseUrl "
+                "pointing to this server and -ApiKey set to your API key."
+            ),
+        )
+
     if not COLLECTOR.exists():
         raise HTTPException(status_code=404, detail=f"Collector script not found: {COLLECTOR}")
 
