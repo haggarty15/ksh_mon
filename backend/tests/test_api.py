@@ -16,8 +16,10 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-# Point to a temp DB before importing the app
-_TMP_DB = tempfile.mktemp(suffix=".db")
+# Point to a temp DB before importing the app.
+# Use mkstemp (not the insecure mktemp) to create the path safely.
+_fd, _TMP_DB = tempfile.mkstemp(suffix=".db")
+os.close(_fd)
 os.environ.setdefault("TEST_DB_PATH", _TMP_DB)
 
 # We monkey-patch get_db_path so all DB calls in tests use the temp file.
