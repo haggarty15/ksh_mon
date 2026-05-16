@@ -8,6 +8,7 @@ GET  /api/events          – Query stored events (filter by type, date, paginat
 GET  /api/dates           – List of dates that have events
 GET  /api/counts          – Event counts per type (optionally filtered by date)
 POST /api/trigger         – Trigger the PowerShell collector on-demand (auth required)
+GET  /api/trigger/pending – Check and consume the pending-trigger flag (auth required)
 GET  /api/summary/latest  – Last 24 h digest as plain text for TTS (auth required)
 GET  /                    – Serve the frontend dashboard (index.html)
 """
@@ -34,9 +35,11 @@ from backend.database import (
     get_available_dates,
     get_baseline_ips,
     get_event_counts_by_type,
+    get_and_clear_trigger_pending,
     init_db,
     insert_events,
     query_events,
+    set_trigger_pending,
 )
 from backend.models import (
     CountsResponse,
@@ -44,6 +47,7 @@ from backend.models import (
     EventListResponse,
     IngestPayload,
     SummaryResponse,
+    TriggerPendingResponse,
     TriggerResponse,
 )
 from backend.tts import speak_on_google_home
@@ -189,7 +193,23 @@ async def trigger_collector():
     After a successful collection, anomaly detection runs automatically; if
     an anomaly is found and a Google Home device IP is configured, the summary
     is spoken aloud via TTS.
+
+    **Cloud mode** (``CLOUD_MODE=1``): the server cannot run PowerShell locally,
+    so this endpoint queues a trigger instead.  The Windows collector must be
+    running with ``-PollMode`` so it picks up the request within ~30 seconds.
     """
+    # Cloud mode: queue the trigger for the Windows collector to pick up
+    if os.environ.get("CLOUD_MODE", "").lower() in ("1", "true", "yes"):
+        await set_trigger_pending()
+        return TriggerResponse(
+            status="queued",
+            message=(
+                "Trigger queued. Your Windows collector will pick this up on its "
+                "next poll cycle (within ~30 s). Make sure collect.ps1 is running "
+                "with -PollMode -ApiBaseUrl <url> -ApiKey <key> on your Windows machine."
+            ),
+        )
+
     if not COLLECTOR.exists():
         raise HTTPException(status_code=404, detail=f"Collector script not found: {COLLECTOR}")
 
@@ -271,6 +291,27 @@ async def trigger_collector():
         tts_spoken=tts_spoken,
         tts_message=tts_message,
     )
+
+
+@app.get(
+    "/api/trigger/pending",
+    response_model=TriggerPendingResponse,
+    summary="Check and consume the pending-trigger flag",
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_trigger_pending():
+    """
+    Return whether a remote trigger is pending and immediately clear the flag
+    (consume-on-read semantics).
+
+    Called by the Windows collector running in ``-PollMode``.  When this
+    returns ``{"pending": true}`` the collector should run a full collection
+    and POST the results to ``/api/ingest``.
+
+    Requires a valid ``x-api-key`` header when an API key is configured.
+    """
+    pending = await get_and_clear_trigger_pending()
+    return TriggerPendingResponse(pending=pending)
 
 
 @app.get(

@@ -14,12 +14,25 @@
 
 .PARAMETER ApiBaseUrl
     Base URL of the running FastAPI backend. If provided, events are POSTed to it.
-    Example: http://127.0.0.1:8000
+    Example: https://vanguard.yourdomain.com
+
+.PARAMETER ApiKey
+    API key to include as the x-api-key header when calling the backend.
+    Required when VANGUARD_API_KEY (or api_key in config.json) is set on the server.
+
+.PARAMETER PollMode
+    When set, the script runs as a long-lived poller instead of a one-shot
+    collector.  It checks GET /api/trigger/pending every 30 seconds and runs a
+    full collection whenever the flag is set (i.e. when a remote trigger — e.g.
+    a Google Home voice action via IFTTT — has been received by the cloud server).
+    Requires -ApiBaseUrl and -ApiKey to be set.
 #>
 
 param(
     [string]$ConfigPath = "$PSScriptRoot\..\config.json",
-    [string]$ApiBaseUrl = ""
+    [string]$ApiBaseUrl = "",
+    [string]$ApiKey     = "",
+    [switch]$PollMode
 )
 
 Set-StrictMode -Version Latest
@@ -409,6 +422,43 @@ function Get-ExplorerCrashes {
 }
 
 # ---------------------------------------------------------------------------
+# Poll mode — long-lived loop for remote-trigger support
+# ---------------------------------------------------------------------------
+
+if ($PollMode) {
+    if ($ApiBaseUrl -eq "") {
+        Write-Log "-PollMode requires -ApiBaseUrl to be set." "ERROR"
+        exit 1
+    }
+
+    $pollHeaders = @{}
+    if ($ApiKey -ne "") {
+        $pollHeaders["x-api-key"] = $ApiKey
+    }
+
+    Write-Log "=== Poll mode started. Checking $ApiBaseUrl/api/trigger/pending every 30 s ==="
+
+    while ($true) {
+        try {
+            $pendingUri  = "$ApiBaseUrl/api/trigger/pending"
+            $pendingResp = Invoke-RestMethod -Uri $pendingUri -Method GET -Headers $pollHeaders -ErrorAction Stop
+            if ($pendingResp.pending) {
+                Write-Log "Remote trigger received — running collection now..."
+                # Re-invoke this script in one-shot mode so all collection
+                # logic runs with the same parameters (minus -PollMode).
+                & $PSCommandPath -ConfigPath $ConfigPath -ApiBaseUrl $ApiBaseUrl -ApiKey $ApiKey
+            }
+        } catch {
+            Write-Log "Failed to check trigger/pending: $_" "WARN"
+        }
+        Start-Sleep -Seconds 30
+    }
+
+    # unreachable, but satisfies strict mode
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -449,7 +499,11 @@ if ($ApiBaseUrl -ne "") {
     try {
         $uri = "$ApiBaseUrl/api/ingest"
         Write-Log "POSTing events to $uri ..."
-        $response = Invoke-RestMethod -Uri $uri -Method POST -Body $json -ContentType "application/json"
+        $ingestHeaders = @{ "Content-Type" = "application/json" }
+        if ($ApiKey -ne "") {
+            $ingestHeaders["x-api-key"] = $ApiKey
+        }
+        $response = Invoke-RestMethod -Uri $uri -Method POST -Body $json -Headers $ingestHeaders
         Write-Log "Ingest response: $($response | ConvertTo-Json -Compress)"
     } catch {
         Write-Log "Failed to POST events to API: $_" "WARN"
