@@ -230,18 +230,33 @@ async def trigger_collector():
     # Run anomaly detection after a successful collection
     anomaly_detected = False
     anomaly_summary = ""
+    tts_spoken = False
+    tts_message = ""
     if success:
         try:
             anomaly = await detect_anomalies(cfg)
             anomaly_detected = anomaly.is_anomaly
             anomaly_summary = anomaly.message
 
+            gh_cfg = cfg.get("google_home", {})
+            device_ip = gh_cfg.get("device_ip", "")
+            language = gh_cfg.get("tts_language", "en")
+            announce_summary_on_trigger = bool(
+                gh_cfg.get("announce_summary_on_trigger", True)
+            )
+
             if anomaly.is_anomaly:
-                gh_cfg = cfg.get("google_home", {})
-                device_ip = gh_cfg.get("device_ip", "")
-                language = gh_cfg.get("tts_language", "en")
-                spoken = _build_spoken_summary(anomaly)
-                speak_on_google_home(spoken, device_ip=device_ip, language=language)
+                tts_message = _build_spoken_summary(anomaly)
+            elif announce_summary_on_trigger:
+                latest = await _build_latest_summary_response(cfg)
+                tts_message = f"Vanguard run complete. {latest.plain_text}"
+
+            if tts_message:
+                tts_spoken = speak_on_google_home(
+                    tts_message,
+                    device_ip=device_ip,
+                    language=language,
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Anomaly detection failed: %s", exc)
 
@@ -252,6 +267,8 @@ async def trigger_collector():
         stderr=result.stderr,
         anomaly_detected=anomaly_detected,
         anomaly_summary=anomaly_summary,
+        tts_spoken=tts_spoken,
+        tts_message=tts_message,
     )
 
 
@@ -269,6 +286,30 @@ async def get_latest_summary():
     Requires a valid ``x-api-key`` header when an API key is configured.
     """
     cfg = load_config()
+    return await _build_latest_summary_response(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _build_spoken_summary(anomaly: AnomalyResult) -> str:
+    """Format an AnomalyResult into a short spoken sentence."""
+    parts: list[str] = []
+    if anomaly.new_ips:
+        n = len(anomaly.new_ips)
+        parts.append(f"{n} new IP{'s' if n != 1 else ''} not seen before")
+    if anomaly.connection_count:
+        parts.append(f"{anomaly.connection_count} network connections")
+    if anomaly.crash_count:
+        parts.append(f"{anomaly.crash_count} crash{'es' if anomaly.crash_count != 1 else ''} detected")
+
+    detail = ", ".join(parts) if parts else anomaly.message
+    return f"Vanguard anomaly alert: {detail}"
+
+
+async def _build_latest_summary_response(cfg: dict[str, Any]) -> SummaryResponse:
+    """Build the latest 24-hour summary payload used by API and trigger TTS."""
     baseline_days: int = int(cfg.get("anomaly", {}).get("baseline_days_back", 7))
 
     summary = await get_24h_summary()
@@ -294,9 +335,7 @@ async def get_latest_summary():
         f"connection{'s' if network_count != 1 else ''}, "
         f"{new_ip_text}, {crash_text}"
     )
-
     as_of = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
     return SummaryResponse(
         plain_text=plain_text,
         network_count=network_count,
@@ -304,22 +343,3 @@ async def get_latest_summary():
         crash_count=crash_count,
         as_of=as_of,
     )
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _build_spoken_summary(anomaly: AnomalyResult) -> str:
-    """Format an AnomalyResult into a short spoken sentence."""
-    parts: list[str] = []
-    if anomaly.new_ips:
-        n = len(anomaly.new_ips)
-        parts.append(f"{n} new IP{'s' if n != 1 else ''} not seen before")
-    if anomaly.connection_count:
-        parts.append(f"{anomaly.connection_count} network connections")
-    if anomaly.crash_count:
-        parts.append(f"{anomaly.crash_count} crash{'es' if anomaly.crash_count != 1 else ''} detected")
-
-    detail = ", ".join(parts) if parts else anomaly.message
-    return f"Vanguard anomaly alert: {detail}"

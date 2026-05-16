@@ -74,6 +74,8 @@ class TriggerResponse(BaseModel):
     stderr: str = ""
     anomaly_detected: bool = False
     anomaly_summary: str = ""
+    tts_spoken: bool = False
+    tts_message: str = ""
 
 
 class SummaryResponse(BaseModel):

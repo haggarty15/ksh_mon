@@ -242,7 +242,8 @@ Alternatively set the `VANGUARD_API_KEY` environment variable (useful in contain
   },
   "google_home": {
     "device_ip": "192.168.1.x",      // IP of your Google Home / Nest device
-    "tts_language": "en"             // BCP-47 language tag
+    "tts_language": "en",            // BCP-47 language tag
+    "announce_summary_on_trigger": true // speak "run complete" summary when no anomaly is found
   }
 }
 ```
@@ -296,8 +297,10 @@ Your app is now reachable at `https://vanguard.yourdomain.com`.
    - Body: `{}`
    - Headers: `x-api-key: your-long-random-secret`
 
-The collector runs, anomaly detection fires, and if an anomaly is found your
-Google Home device speaks the summary aloud.
+The collector runs, anomaly detection fires, and your Google Home can now speak:
+
+- an anomaly alert (when anomaly is found), or
+- a "run complete" summary (when no anomaly is found and `announce_summary_on_trigger` is true).
 
 ### 5 — Dashboard / TTS outbound summary
 

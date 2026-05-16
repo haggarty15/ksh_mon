@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import AsyncGenerator
 
 import pytest
@@ -336,6 +337,127 @@ async def test_trigger_correct_api_key_passes_auth(client: AsyncClient):
     resp = await client.post("/api/trigger", headers={"x-api-key": "secret123"})
     # 403 must not be returned; 404/500/504 is acceptable in a test environment
     assert resp.status_code != 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_speaks_run_complete_summary_when_enabled(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """Successful trigger with no anomaly should surface a run-complete TTS summary."""
+    import backend.main as main_module
+    from backend.anomaly import AnomalyResult
+    from backend.models import SummaryResponse
+
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+
+    monkeypatch.setattr(main_module, "COLLECTOR", Path(_TMP_DB))
+    monkeypatch.setattr(
+        main_module,
+        "load_config",
+        lambda: {
+            "server": {"host": "127.0.0.1", "port": 8000},
+            "anomaly": {"baseline_days_back": 7},
+            "google_home": {
+                "device_ip": "192.168.1.25",
+                "tts_language": "en",
+                "announce_summary_on_trigger": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        main_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+    )
+
+    async def _fake_detect(*args, **kwargs):
+        return AnomalyResult(is_anomaly=False, message="no anomalies detected")
+
+    async def _fake_summary(*args, **kwargs):
+        return SummaryResponse(
+            plain_text="Vanguard report: 3 network connections, no new IPs, no crashes detected",
+            network_count=3,
+            new_ip_count=0,
+            crash_count=0,
+            as_of="2026-01-01T00:00:00Z",
+        )
+
+    spoken: dict[str, str] = {}
+
+    def _fake_speak(message: str, device_ip: str, language: str = "en", wait_seconds: int = 20) -> bool:
+        spoken["message"] = message
+        spoken["device_ip"] = device_ip
+        spoken["language"] = language
+        return True
+
+    monkeypatch.setattr(main_module, "detect_anomalies", _fake_detect)
+    monkeypatch.setattr(main_module, "_build_latest_summary_response", _fake_summary)
+    monkeypatch.setattr(main_module, "speak_on_google_home", _fake_speak)
+
+    resp = await client.post("/api/trigger", headers={"x-api-key": "secret123"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["anomaly_detected"] is False
+    assert body["tts_spoken"] is True
+    assert body["tts_message"].startswith("Vanguard run complete.")
+    assert spoken["device_ip"] == "192.168.1.25"
+    assert spoken["language"] == "en"
+    assert spoken["message"] == body["tts_message"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_speaks_anomaly_alert_when_anomaly_detected(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """When anomaly is detected, trigger should speak anomaly alert text."""
+    import backend.main as main_module
+    from backend.anomaly import AnomalyResult
+
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+
+    monkeypatch.setattr(main_module, "COLLECTOR", Path(_TMP_DB))
+    monkeypatch.setattr(
+        main_module,
+        "load_config",
+        lambda: {
+            "server": {"host": "127.0.0.1", "port": 8000},
+            "anomaly": {"baseline_days_back": 7},
+            "google_home": {
+                "device_ip": "192.168.1.25",
+                "tts_language": "en",
+                "announce_summary_on_trigger": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        main_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+    )
+
+    async def _fake_detect(*args, **kwargs):
+        return AnomalyResult(
+            is_anomaly=True,
+            new_ips=["9.9.9.9"],
+            connection_count=10,
+            crash_count=1,
+            message="1 new IP(s) not seen in the last 7 days; 1 crash(es) detected",
+        )
+
+    spoken: dict[str, str] = {}
+
+    def _fake_speak(message: str, device_ip: str, language: str = "en", wait_seconds: int = 20) -> bool:
+        spoken["message"] = message
+        return True
+
+    monkeypatch.setattr(main_module, "detect_anomalies", _fake_detect)
+    monkeypatch.setattr(main_module, "speak_on_google_home", _fake_speak)
+
+    resp = await client.post("/api/trigger", headers={"x-api-key": "secret123"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["anomaly_detected"] is True
+    assert body["tts_spoken"] is True
+    assert body["tts_message"].startswith("Vanguard anomaly alert:")
+    assert spoken["message"] == body["tts_message"]
 
 
 # ---------------------------------------------------------------------------
