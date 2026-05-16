@@ -1,0 +1,14 @@
+{
+  "db_path": "data/vanguard_monitor.db",
+  "collector": {
+    "event_log_hours_back": 24,
+    "processes_to_monitor": ["vgc.exe", "RiotClientServices.exe", "vgk.sys"],
+    "driver_names": ["vgk", "vgc"],
+    "shell_ext_dll": "cmdlineext_x64.dll",
+    "output_json_path": "data/latest_collection.json"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000
+  }
+}

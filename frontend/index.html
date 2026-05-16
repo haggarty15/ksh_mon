@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vanguard System Monitor</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                          */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f0f13;
+      --surface:   #1a1a22;
+      --border:    #2c2c3a;
+      --accent:    #e84f5e;
+      --accent2:   #5e88e8;
+      --text:      #e0e0e8;
+      --muted:     #7c7c9a;
+      --success:   #4caf82;
+      --warn:      #f0a030;
+      --danger:    #e84f5e;
+      --radius:    8px;
+      --font:      'Segoe UI', system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+    }
+
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout                                                               */
+    /* ------------------------------------------------------------------ */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header .logo {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+    header .subtitle {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    header .spacer { flex: 1; }
+    header .last-collected {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 1.5rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Summary cards                                                        */
+    /* ------------------------------------------------------------------ */
+    .summary-bar {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+    }
+
+    .summary-card {
+      flex: 1;
+      min-width: 140px;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.1s;
+    }
+    .summary-card:hover  { border-color: var(--accent2); transform: translateY(-1px); }
+    .summary-card.active { border-color: var(--accent); }
+
+    .summary-card .count {
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .summary-card .label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: 0.25rem;
+    }
+
+    .type-driver  .count { color: #5e88e8; }
+    .type-network .count { color: #4caf82; }
+    .type-error   .count { color: #e84f5e; }
+    .type-crash   .count { color: #f0a030; }
+    .type-shell_ext .count { color: #b066e8; }
+    .type-all     .count { color: var(--text); }
+
+    /* ------------------------------------------------------------------ */
+    /* Sidebar                                                              */
+    /* ------------------------------------------------------------------ */
+    aside {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .sidebar-section h3 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .date-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .date-list li {
+      padding: 0.4rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.1s;
+    }
+    .date-list li:hover    { background: var(--border); }
+    .date-list li.active   { background: var(--border); border-color: var(--accent); color: var(--accent); }
+
+    /* Trigger button */
+    #triggerBtn {
+      width: 100%;
+      padding: 0.65rem 1rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    #triggerBtn:hover    { opacity: 0.88; }
+    #triggerBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    #triggerStatus {
+      font-size: 0.78rem;
+      margin-top: 0.5rem;
+      min-height: 1.2em;
+      word-break: break-word;
+    }
+    #triggerStatus.ok   { color: var(--success); }
+    #triggerStatus.err  { color: var(--danger); }
+
+    /* ------------------------------------------------------------------ */
+    /* Events table                                                         */
+    /* ------------------------------------------------------------------ */
+    section.events-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .toolbar h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .filter-select, .search-input {
+      padding: 0.4rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .filter-select:focus, .search-input:focus {
+      outline: none;
+      border-color: var(--accent2);
+    }
+    .search-input { min-width: 200px; }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+    }
+    th, td {
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 1;
+    }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+
+    /* type badges */
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge-driver    { background: rgba(94,136,232,0.18); color: #5e88e8; }
+    .badge-network   { background: rgba(76,175,130,0.18); color: #4caf82; }
+    .badge-error     { background: rgba(232,79,94,0.18);  color: #e84f5e; }
+    .badge-crash     { background: rgba(240,160,48,0.18); color: #f0a030; }
+    .badge-shell_ext { background: rgba(176,102,232,0.18);color: #b066e8; }
+    .badge-unknown   { background: rgba(124,124,154,0.18);color: var(--muted); }
+
+    .msg-cell {
+      max-width: 500px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+    }
+
+    /* expandable row */
+    .detail-row td {
+      padding: 0;
+      background: rgba(0,0,0,0.3);
+    }
+    .detail-content {
+      padding: 0.75rem 1rem;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #b0b0c8;
+      border-left: 3px solid var(--accent2);
+    }
+
+    /* pagination */
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .pagination button {
+      padding: 0.3rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+    .pagination button:hover    { border-color: var(--accent2); }
+    .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* empty / loading states */
+    .state-msg {
+      text-align: center;
+      color: var(--muted);
+      padding: 3rem 0;
+      font-size: 0.9rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Responsive                                                           */
+    /* ------------------------------------------------------------------ */
+    @media (max-width: 768px) {
+      main {
+        grid-template-columns: 1fr;
+        padding: 1rem;
+      }
+      .summary-bar { flex-direction: row; }
+      .summary-card { min-width: 110px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">&#x1F6E1; Vanguard Monitor</div>
+    <div class="subtitle">Riot Vanguard activity dashboard — local only</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="last-collected" id="lastCollected">—</div>
+</header>
+
+<main>
+  <!-- Summary cards -->
+  <div class="summary-bar" id="summaryBar">
+    <div class="card summary-card type-all active" data-type="" onclick="App.setTypeFilter('')">
+      <div class="count" id="cnt-all">0</div>
+      <div class="label">All events</div>
+    </div>
+    <div class="card summary-card type-driver" data-type="driver" onclick="App.setTypeFilter('driver')">
+      <div class="count" id="cnt-driver">0</div>
+      <div class="label">Driver</div>
+    </div>
+    <div class="card summary-card type-network" data-type="network" onclick="App.setTypeFilter('network')">
+      <div class="count" id="cnt-network">0</div>
+      <div class="label">Network</div>
+    </div>
+    <div class="card summary-card type-error" data-type="error" onclick="App.setTypeFilter('error')">
+      <div class="count" id="cnt-error">0</div>
+      <div class="label">Errors</div>
+    </div>
+    <div class="card summary-card type-crash" data-type="crash" onclick="App.setTypeFilter('crash')">
+      <div class="count" id="cnt-crash">0</div>
+      <div class="label">Crashes</div>
+    </div>
+    <div class="card summary-card type-shell_ext" data-type="shell_ext" onclick="App.setTypeFilter('shell_ext')">
+      <div class="count" id="cnt-shell_ext">0</div>
+      <div class="label">Shell Ext</div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside>
+    <div class="card sidebar-section">
+      <h3>Browse by date</h3>
+      <ul class="date-list" id="dateList">
+        <li style="color:var(--muted);font-size:0.8rem">Loading…</li>
+      </ul>
+    </div>
+
+    <div class="card sidebar-section">
+      <h3>Collector</h3>
+      <button id="triggerBtn" onclick="App.triggerCollector()">&#x25B6; Run Now</button>
+      <div id="triggerStatus"></div>
+    </div>
+  </aside>
+
+  <!-- Events panel -->
+  <section class="events-panel">
+    <div class="toolbar">
+      <h2 id="panelTitle">All Events</h2>
+      <input class="search-input" type="text" id="searchInput" placeholder="Search message…" oninput="App.onSearch()" />
+      <select class="filter-select" id="typeSelect" onchange="App.onTypeSelectChange()">
+        <option value="">All types</option>
+        <option value="driver">Driver</option>
+        <option value="network">Network</option>
+        <option value="error">Error</option>
+        <option value="crash">Crash</option>
+        <option value="shell_ext">Shell Ext</option>
+      </select>
+    </div>
+
+    <div class="card table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:160px">Timestamp</th>
+            <th style="width:100px">Type</th>
+            <th style="width:180px">Source</th>
+            <th style="width:60px">ID</th>
+            <th style="width:80px">Level</th>
+            <th>Message / Details</th>
+          </tr>
+        </thead>
+        <tbody id="eventsTbody">
+          <tr><td colspan="6" class="state-msg">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pagination">
+      <span id="pageInfo">— of —</span>
+      <button id="prevBtn" onclick="App.prevPage()" disabled>&#x2190; Prev</button>
+      <button id="nextBtn" onclick="App.nextPage()" disabled>Next &#x2192;</button>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ======================================================================
+   Vanguard Monitor – Frontend
+   ====================================================================== */
+const API = '';  // relative to current origin
+const PAGE_SIZE = 50;
+
+const App = (() => {
+  let _state = {
+    date:       null,
+    eventType:  '',
+    search:     '',
+    offset:     0,
+    total:      0,
+    events:     [],
+    searchTimer: null,
+  };
+
+  // ---- Init ---------------------------------------------------------- //
+  async function init() {
+    await Promise.all([loadDates(), loadCounts(), loadEvents()]);
+  }
+
+  // ---- Dates --------------------------------------------------------- //
+  async function loadDates() {
+    try {
+      const res = await fetch(`${API}/api/dates`);
+      const data = await res.json();
+      renderDates(data.dates || []);
+    } catch (e) {
+      console.error('loadDates', e);
+    }
+  }
+
+  function renderDates(dates) {
+    const ul = document.getElementById('dateList');
+    if (!dates.length) {
+      ul.innerHTML = '<li style="color:var(--muted);font-size:0.8rem">No data yet</li>';
+      return;
+    }
+    ul.innerHTML = '<li class="' + (_state.date === null ? 'active' : '') + '" onclick="App.setDate(null)">All dates</li>' +
+      dates.map(d => {
+        const active = _state.date === d ? 'active' : '';
+        return `<li class="${active}" onclick="App.setDate('${d}')">${d}</li>`;
+      }).join('');
+  }
+
+  // ---- Counts -------------------------------------------------------- //
+  async function loadCounts() {
+    try {
+      const qs = _state.date ? `?date=${_state.date}` : '';
+      const res = await fetch(`${API}/api/counts${qs}`);
+      const data = await res.json();
+      const counts = data.counts || {};
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
+      document.getElementById('cnt-all').textContent     = total;
+      document.getElementById('cnt-driver').textContent  = counts.driver    || 0;
+      document.getElementById('cnt-network').textContent = counts.network   || 0;
+      document.getElementById('cnt-error').textContent   = counts.error     || 0;
+      document.getElementById('cnt-crash').textContent   = counts.crash     || 0;
+      document.getElementById('cnt-shell_ext').textContent = counts.shell_ext || 0;
+    } catch (e) {
+      console.error('loadCounts', e);
+    }
+  }
+
+  // ---- Events -------------------------------------------------------- //
+  async function loadEvents() {
+    const tbody = document.getElementById('eventsTbody');
+    tbody.innerHTML = '<tr><td colspan="6" class="state-msg">Loading…</td></tr>';
+
+    const params = new URLSearchParams();
+    if (_state.eventType) params.set('event_type', _state.eventType);
+    if (_state.date)      params.set('date', _state.date);
+    params.set('limit',  PAGE_SIZE);
+    params.set('offset', _state.offset);
+
+    try {
+      const res  = await fetch(`${API}/api/events?${params}`);
+      const data = await res.json();
+      _state.total  = data.total || 0;
+      _state.events = data.events || [];
+
+      // Client-side search filter
+      const q = _state.search.toLowerCase();
+      const filtered = q
+        ? _state.events.filter(ev => (ev.message || '').toLowerCase().includes(q))
+        : _state.events;
+
+      renderEvents(filtered);
+      renderPagination();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="6" class="state-msg" style="color:var(--danger)">Error loading events: ${e.message}</td></tr>`;
+    }
+  }
+
+  function renderEvents(events) {
+    const tbody = document.getElementById('eventsTbody');
+    if (!events.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="state-msg">No events found.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = events.map((ev, i) => {
+      const ts      = formatTs(ev.timestamp);
+      const badge   = `<span class="badge badge-${ev.event_type || 'unknown'}">${ev.event_type || '?'}</span>`;
+      const src     = escHtml(ev.source || '');
+      const eid     = ev.event_id != null ? ev.event_id : '';
+      const lvl     = escHtml(ev.level || '');
+      const msg     = escHtml((ev.message || '').slice(0, 200));
+      const rowId   = `row-${i}`;
+      const detId   = `det-${i}`;
+      return `
+        <tr id="${rowId}" onclick="App.toggleDetail(${i})" style="cursor:pointer">
+          <td>${ts}</td>
+          <td>${badge}</td>
+          <td title="${src}">${src.slice(0, 28)}</td>
+          <td>${eid}</td>
+          <td>${lvl}</td>
+          <td class="msg-cell">${msg}</td>
+        </tr>
+        <tr id="${detId}" class="detail-row" style="display:none">
+          <td colspan="6"><div class="detail-content">${buildDetail(ev)}</div></td>
+        </tr>`;
+    }).join('');
+  }
+
+  function buildDetail(ev) {
+    const lines = [];
+    if (ev.timestamp) lines.push(`Timestamp : ${ev.timestamp}`);
+    if (ev.source)    lines.push(`Source    : ${ev.source}`);
+    if (ev.event_id)  lines.push(`Event ID  : ${ev.event_id}`);
+    if (ev.level)     lines.push(`Level     : ${ev.level}`);
+    if (ev.message)   lines.push(`\nMessage:\n${ev.message}`);
+    if (ev.extra && Object.keys(ev.extra).length) {
+      lines.push('\nExtra fields:');
+      for (const [k, v] of Object.entries(ev.extra)) {
+        lines.push(`  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+      }
+    }
+    return escHtml(lines.join('\n'));
+  }
+
+  function toggleDetail(i) {
+    const det = document.getElementById(`det-${i}`);
+    if (det) det.style.display = det.style.display === 'none' ? '' : 'none';
+  }
+
+  // ---- Pagination ---------------------------------------------------- //
+  function renderPagination() {
+    const from  = _state.total === 0 ? 0 : _state.offset + 1;
+    const to    = Math.min(_state.offset + PAGE_SIZE, _state.total);
+    document.getElementById('pageInfo').textContent = `${from}–${to} of ${_state.total}`;
+    document.getElementById('prevBtn').disabled = _state.offset === 0;
+    document.getElementById('nextBtn').disabled = (_state.offset + PAGE_SIZE) >= _state.total;
+  }
+
+  function prevPage() {
+    if (_state.offset === 0) return;
+    _state.offset = Math.max(0, _state.offset - PAGE_SIZE);
+    loadEvents();
+  }
+  function nextPage() {
+    if ((_state.offset + PAGE_SIZE) >= _state.total) return;
+    _state.offset += PAGE_SIZE;
+    loadEvents();
+  }
+
+  // ---- Filters ------------------------------------------------------- //
+  function setDate(date) {
+    _state.date   = date;
+    _state.offset = 0;
+    Promise.all([loadDates(), loadCounts(), loadEvents()]);
+    const title = date ? `Events on ${date}` : 'All Events';
+    document.getElementById('panelTitle').textContent = title;
+  }
+
+  function setTypeFilter(type) {
+    _state.eventType = type;
+    _state.offset    = 0;
+    document.getElementById('typeSelect').value = type;
+    // update active card
+    document.querySelectorAll('.summary-card').forEach(el => {
+      el.classList.toggle('active', el.dataset.type === type);
+    });
+    loadEvents();
+  }
+
+  function onTypeSelectChange() {
+    const type = document.getElementById('typeSelect').value;
+    setTypeFilter(type);
+  }
+
+  function onSearch() {
+    clearTimeout(_state.searchTimer);
+    _state.searchTimer = setTimeout(() => {
+      _state.search = document.getElementById('searchInput').value;
+      _state.offset = 0;
+      loadEvents();
+    }, 300);
+  }
+
+  // ---- Trigger ------------------------------------------------------- //
+  async function triggerCollector() {
+    const btn    = document.getElementById('triggerBtn');
+    const status = document.getElementById('triggerStatus');
+    btn.disabled = true;
+    btn.textContent = '⏳ Running…';
+    status.textContent = '';
+    status.className = '';
+
+    try {
+      const res  = await fetch(`${API}/api/trigger`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        status.textContent = '✔ Collection complete.';
+        status.className = 'ok';
+        // Refresh data
+        await Promise.all([loadDates(), loadCounts(), loadEvents()]);
+        document.getElementById('lastCollected').textContent =
+          'Last collected: ' + new Date().toLocaleTimeString();
+      } else {
+        status.textContent = '✖ ' + (data.message || 'Error');
+        status.className = 'err';
+        if (data.stderr) console.warn('Collector stderr:', data.stderr);
+      }
+    } catch (e) {
+      status.textContent = '✖ ' + e.message;
+      status.className = 'err';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶ Run Now';
+    }
+  }
+
+  // ---- Helpers ------------------------------------------------------- //
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function formatTs(ts) {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+    } catch { return ts; }
+  }
+
+  return {
+    init,
+    setDate,
+    setTypeFilter,
+    onTypeSelectChange,
+    onSearch,
+    triggerCollector,
+    prevPage,
+    nextPage,
+    toggleDetail,
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+</body>
+</html>
