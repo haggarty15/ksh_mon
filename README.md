@@ -150,7 +150,7 @@ ksh_mon/
 | `GET` | `/api/events` | Query stored events (`event_type`, `date`, `limit`, `offset`) | No |
 | `GET` | `/api/dates` | List dates that have events | No |
 | `GET` | `/api/counts` | Event counts per type (optional `date` filter) | No |
-| `POST` | `/api/trigger` | Trigger collector on-demand; queues in cloud mode | If key set |
+| `POST` | `/api/trigger` | Run collector on-demand (local mode) or queue a trigger for the Windows collector to pick up (cloud mode — `CLOUD_MODE=1`) | If key set |
 | `GET` | `/api/trigger/pending` | Check and consume the pending-trigger flag (used by Windows collector in poll mode) | If key set |
 | `GET` | `/api/summary/latest` | Last 24 h digest as plain text (for TTS / IFTTT) | If key set |
 

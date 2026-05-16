@@ -734,7 +734,7 @@ async def test_trigger_cloud_mode_requires_auth(client: AsyncClient, monkeypatch
 async def test_trigger_non_cloud_mode_unaffected(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     """Without CLOUD_MODE, /api/trigger still attempts to run PowerShell (non-403)."""
     monkeypatch.delenv("CLOUD_MODE", raising=False)
-    os.environ.pop("VANGUARD_API_KEY", None)
+    monkeypatch.delenv("VANGUARD_API_KEY", raising=False)
     resp = await client.post("/api/trigger")
     # Auth is not required (no key configured); PowerShell may not be present
     # in CI but we must NOT get a queued response or 403.

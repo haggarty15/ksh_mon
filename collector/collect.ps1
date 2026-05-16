@@ -444,9 +444,15 @@ if ($PollMode) {
             $pendingResp = Invoke-RestMethod -Uri $pendingUri -Method GET -Headers $pollHeaders -ErrorAction Stop
             if ($pendingResp.pending) {
                 Write-Log "Remote trigger received — running collection now..."
-                # Re-invoke this script in one-shot mode so all collection
-                # logic runs with the same parameters (minus -PollMode).
-                & $PSCommandPath -ConfigPath $ConfigPath -ApiBaseUrl $ApiBaseUrl -ApiKey $ApiKey
+                # Re-invoke this script in one-shot mode, forwarding all parameters
+                # except -PollMode so the same ConfigPath/ApiBaseUrl/ApiKey are used.
+                $forwardParams = @{}
+                foreach ($key in $PSBoundParameters.Keys) {
+                    if ($key -ne "PollMode") {
+                        $forwardParams[$key] = $PSBoundParameters[$key]
+                    }
+                }
+                & $PSCommandPath @forwardParams
             }
         } catch {
             Write-Log "Failed to check trigger/pending: $_" "WARN"
