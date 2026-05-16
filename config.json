@@ -1,0 +1,25 @@
+{
+  "db_path": "data/vanguard_monitor.db",
+  "api_key": "",
+  "collector": {
+    "event_log_hours_back": 24,
+    "processes_to_monitor": ["vgc.exe", "RiotClientServices.exe", "vgk.sys"],
+    "driver_names": ["vgk", "vgc"],
+    "shell_ext_dll": "cmdlineext_x64.dll",
+    "output_json_path": "data/latest_collection.json"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "anomaly": {
+    "new_ip_threshold": 1,
+    "connection_count_threshold": 50,
+    "alert_on_crash": true,
+    "baseline_days_back": 7
+  },
+  "google_home": {
+    "device_ip": "",
+    "tts_language": "en"
+  }
+}

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Vanguard Monitor – Windows Task Scheduler XML
+  Registers a daily task (3:00 AM) and an on-logon trigger.
+
+  Usage (run setup.ps1 or register manually):
+    schtasks /Create /TN "VanguardMonitor\DailyCollect" /XML scheduler\vanguard_monitor_task.xml /F
+
+  NOTE: setup.ps1 replaces REPO_ROOT_PLACEHOLDER with the actual repo path.
+        If registering manually, replace REPO_ROOT_PLACEHOLDER before importing.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Collects Vanguard anti-cheat telemetry daily and sends it to the local monitor dashboard.</Description>
+    <Author>ksh_mon</Author>
+    <Version>1.0</Version>
+  </RegistrationInfo>
+  <Triggers>
+    <!-- Daily at 03:00 -->
+    <CalendarTrigger>
+      <StartBoundary>2025-01-01T03:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+    <!-- Also on user logon -->
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT2M</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NonInteractive -NoProfile -ExecutionPolicy Bypass -File "REPO_ROOT_PLACEHOLDER\collector\collect.ps1" -ConfigPath "REPO_ROOT_PLACEHOLDER\config.json" -ApiBaseUrl "http://127.0.0.1:8000"</Arguments>
+      <WorkingDirectory>REPO_ROOT_PLACEHOLDER</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
