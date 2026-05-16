@@ -142,6 +142,27 @@ async def test_ingest_multiple_types(client: AsyncClient):
     assert resp.json()["inserted"] == 5
 
 
+@pytest.mark.asyncio
+async def test_ingest_requires_api_key_when_configured(client: AsyncClient):
+    """When an API key is configured, /api/ingest must reject requests without it."""
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.post("/api/ingest", json=SAMPLE_PAYLOAD)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_ingest_passes_with_correct_api_key(client: AsyncClient):
+    """Correct x-api-key header allows ingest when a key is configured."""
+    os.environ["VANGUARD_API_KEY"] = "secret123"
+    resp = await client.post(
+        "/api/ingest",
+        json=SAMPLE_PAYLOAD,
+        headers={"x-api-key": "secret123"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Tests – /api/events
 # ---------------------------------------------------------------------------
@@ -337,6 +358,17 @@ async def test_trigger_correct_api_key_passes_auth(client: AsyncClient):
     resp = await client.post("/api/trigger", headers={"x-api-key": "secret123"})
     # 403 must not be returned; 404/500/504 is acceptable in a test environment
     assert resp.status_code != 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_returns_501_in_cloud_mode(client: AsyncClient):
+    """In CLOUD_MODE the /api/trigger endpoint must return 501."""
+    os.environ["CLOUD_MODE"] = "1"
+    try:
+        resp = await client.post("/api/trigger")
+        assert resp.status_code == 501
+    finally:
+        os.environ.pop("CLOUD_MODE", None)
 
 
 @pytest.mark.asyncio

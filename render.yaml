@@ -1,0 +1,28 @@
+# Render.com deployment configuration
+# https://render.com/docs/render-yaml-spec
+#
+# Deploy:
+#   1. Push this repo to GitHub.
+#   2. Create a new Render account / project.
+#   3. Click "New → Blueprint" and point it at this repo.
+#   4. Set VANGUARD_API_KEY to a strong random secret in the Render dashboard
+#      (or let Render generate one with generateValue: true below).
+
+services:
+  - type: web
+    name: ksh-mon
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/dates
+    envVars:
+      - key: CLOUD_MODE
+        value: "1"
+      # Render will generate a random value; copy it for use in collect.ps1 -ApiKey
+      - key: VANGUARD_API_KEY
+        generateValue: true
+      - key: VANGUARD_DB_PATH
+        value: /opt/render/project/data/vanguard_monitor.db
+    disk:
+      name: vanguard-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1

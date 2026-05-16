@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - CLOUD_MODE=1
+      # Set a strong random value; also required by collect.ps1 -ApiKey
+      - VANGUARD_API_KEY=${VANGUARD_API_KEY:-}
+      - VANGUARD_DB_PATH=/app/data/vanguard_monitor.db
+    volumes:
+      # Persist the SQLite database across container restarts
+      - vanguard_data:/app/data
+
+volumes:
+  vanguard_data:
