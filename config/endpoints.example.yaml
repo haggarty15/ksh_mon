@@ -26,7 +26,7 @@ targets:
       tunnel_name: ksh-meshnet
       interval_seconds: 10
       latency_probe_target: 1.1.1.1
-    claude_workspace_sessions:
+    remote_sessions:
       - name: primary-remote-session
         expected_state: connected
         interval_seconds: 15

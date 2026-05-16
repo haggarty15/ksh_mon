@@ -380,12 +380,12 @@ async def test_trigger_speaks_run_complete_summary_when_enabled(client: AsyncCli
             as_of="2026-01-01T00:00:00Z",
         )
 
-    spoken: dict[str, str] = {}
+    tts_call_details: dict[str, str] = {}
 
     def _fake_speak(message: str, device_ip: str, language: str = "en", wait_seconds: int = 20) -> bool:
-        spoken["message"] = message
-        spoken["device_ip"] = device_ip
-        spoken["language"] = language
+        tts_call_details["message"] = message
+        tts_call_details["device_ip"] = device_ip
+        tts_call_details["language"] = language
         return True
 
     monkeypatch.setattr(main_module, "detect_anomalies", _fake_detect)
@@ -399,9 +399,9 @@ async def test_trigger_speaks_run_complete_summary_when_enabled(client: AsyncCli
     assert body["anomaly_detected"] is False
     assert body["tts_spoken"] is True
     assert body["tts_message"].startswith("Vanguard run complete.")
-    assert spoken["device_ip"] == "192.168.1.25"
-    assert spoken["language"] == "en"
-    assert spoken["message"] == body["tts_message"]
+    assert tts_call_details["device_ip"] == "192.168.1.25"
+    assert tts_call_details["language"] == "en"
+    assert tts_call_details["message"] == body["tts_message"]
 
 
 @pytest.mark.asyncio
@@ -441,10 +441,10 @@ async def test_trigger_speaks_anomaly_alert_when_anomaly_detected(client: AsyncC
             message="1 new IP(s) not seen in the last 7 days; 1 crash(es) detected",
         )
 
-    spoken: dict[str, str] = {}
+    tts_call_details: dict[str, str] = {}
 
     def _fake_speak(message: str, device_ip: str, language: str = "en", wait_seconds: int = 20) -> bool:
-        spoken["message"] = message
+        tts_call_details["message"] = message
         return True
 
     monkeypatch.setattr(main_module, "detect_anomalies", _fake_detect)
@@ -457,7 +457,7 @@ async def test_trigger_speaks_anomaly_alert_when_anomaly_detected(client: AsyncC
     assert body["anomaly_detected"] is True
     assert body["tts_spoken"] is True
     assert body["tts_message"].startswith("Vanguard anomaly alert:")
-    assert spoken["message"] == body["tts_message"]
+    assert tts_call_details["message"] == body["tts_message"]
 
 
 # ---------------------------------------------------------------------------
