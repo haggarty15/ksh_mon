@@ -83,19 +83,30 @@ Edit `config.json` to customise behaviour:
 
 ```jsonc
 {
-  "db_path": "data/vanguard_monitor.db",        // path to SQLite database
+  "db_path": "data/vanguard_monitor.db",  // path to SQLite database
+  "api_key": "",                           // set to require x-api-key header on trigger/summary endpoints
   "collector": {
-    "event_log_hours_back": 24,                 // how far back to scan Event Log
-    "processes_to_monitor": [                   // processes whose connections are tracked
+    "event_log_hours_back": 24,           // how far back to scan Event Log
+    "processes_to_monitor": [             // processes whose connections are tracked
       "vgc.exe", "RiotClientServices.exe", "vgk.sys"
     ],
-    "driver_names": ["vgk", "vgc"],             // strings to match in Event Log messages
-    "shell_ext_dll": "cmdlineext_x64.dll",      // SecuROM DLL name to check
+    "driver_names": ["vgk", "vgc"],       // strings to match in Event Log messages
+    "shell_ext_dll": "cmdlineext_x64.dll",// SecuROM DLL name to check
     "output_json_path": "data/latest_collection.json"
   },
   "server": {
     "host": "127.0.0.1",
     "port": 8000
+  },
+  "anomaly": {
+    "new_ip_threshold": 1,               // flag if ≥ N new IPs appear today
+    "connection_count_threshold": 50,     // flag if total connections exceed N
+    "alert_on_crash": true,              // flag any crash event
+    "baseline_days_back": 7              // how many past days form the IP baseline
+  },
+  "google_home": {
+    "device_ip": "",                     // IP of Google Home / Nest (leave empty to disable TTS)
+    "tts_language": "en"                 // BCP-47 language tag
   }
 }
 ```
@@ -113,6 +124,8 @@ ksh_mon/
 │   ├── main.py                   # FastAPI app + API routes
 │   ├── database.py               # Async SQLite helpers
 │   ├── models.py                 # Pydantic models
+│   ├── anomaly.py                # Anomaly detection logic
+│   ├── tts.py                    # Google Home TTS (pychromecast)
 │   ├── requirements.txt
 │   └── tests/
 │       ├── __init__.py
@@ -131,13 +144,14 @@ ksh_mon/
 
 ## API reference
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/ingest` | Receive events from the PowerShell collector |
-| `GET` | `/api/events` | Query stored events (`event_type`, `date`, `limit`, `offset`) |
-| `GET` | `/api/dates` | List dates that have events |
-| `GET` | `/api/counts` | Event counts per type (optional `date` filter) |
-| `POST` | `/api/trigger` | Trigger the PowerShell collector on-demand |
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/api/ingest` | Receive events from the PowerShell collector | No |
+| `GET` | `/api/events` | Query stored events (`event_type`, `date`, `limit`, `offset`) | No |
+| `GET` | `/api/dates` | List dates that have events | No |
+| `GET` | `/api/counts` | Event counts per type (optional `date` filter) | No |
+| `POST` | `/api/trigger` | Trigger the PowerShell collector on-demand; runs anomaly detection afterwards | If key set |
+| `GET` | `/api/summary/latest` | Last 24 h digest as plain text (for TTS / IFTTT) | If key set |
 
 Interactive docs: **http://127.0.0.1:8000/docs**
 
@@ -171,7 +185,127 @@ schtasks /Run /TN "VanguardMonitor\DailyCollect"
 
 ## Notes
 
-- **No authentication** — designed for local-only use. Do not expose the server to the network.
+- **Local-only mode** — leave `api_key` empty in `config.json` and no auth is required. Do not expose the server to the network without setting a key.
 - The collector requires elevated privileges to read the Windows Security/System Event Log.
 - Sysmon events (if Sysmon is installed) will be captured automatically via the System log queries.
 - The SecuROM `cmdlineext_x64.dll` monitoring tracks the Explorer crash root cause identified in May 2025.
+
+---
+
+## Google Home integration
+
+### Architecture overview
+
+```
+Existing app (FastAPI + SQLite)
+    ↓
+Cloudflare Tunnel (free, always-on Windows service)
+    ↓ stable public HTTPS endpoint
+┌─────────────────────────────────┐    ┌──────────────────────────────────┐
+│  INBOUND — voice → app          │    │  OUTBOUND — app → voice          │
+│  "Hey Google, run report"       │    │  App detects anomaly             │
+│      ↓                          │    │      ↓                           │
+│  IFTTT Webhooks                 │    │  pychromecast TTS cast           │
+│      ↓                          │    │      ↓                           │
+│  POST /api/trigger              │    │  Google Home speaks summary      │
+└─────────────────────────────────┘    └──────────────────────────────────┘
+```
+
+### 1 — Set an API key
+
+Edit `config.json` and fill in `api_key`:
+
+```json
+{
+  "api_key": "your-long-random-secret",
+  ...
+}
+```
+
+All requests to `/api/trigger` and `/api/summary/latest` must include:
+
+```
+x-api-key: your-long-random-secret
+```
+
+Alternatively set the `VANGUARD_API_KEY` environment variable (useful in containers).
+
+### 2 — Configure anomaly thresholds and Google Home
+
+```jsonc
+{
+  "anomaly": {
+    "new_ip_threshold": 1,           // flag if ≥ N new IPs appear today
+    "connection_count_threshold": 50, // flag if total connections exceed N
+    "alert_on_crash": true,           // flag any crash event
+    "baseline_days_back": 7           // how many past days form the IP baseline
+  },
+  "google_home": {
+    "device_ip": "192.168.1.x",      // IP of your Google Home / Nest device
+    "tts_language": "en"             // BCP-47 language tag
+  }
+}
+```
+
+Leave `device_ip` empty to disable TTS (anomaly detection still runs).
+
+### 3 — Cloudflare Tunnel (inbound from internet)
+
+Cloudflare Tunnel exposes your local server at a stable public HTTPS URL with
+no port-forwarding or static IP required.
+
+```powershell
+# 1. Download cloudflared
+winget install Cloudflare.cloudflared          # or download from https://github.com/cloudflare/cloudflared/releases
+
+# 2. Authenticate (opens browser — one-time)
+cloudflared tunnel login
+
+# 3. Create a named tunnel
+cloudflared tunnel create vanguard-monitor
+
+# 4. Create the config file  C:\Users\YOU\.cloudflared\config.yml
+#    (replace <TUNNEL-ID> with the UUID printed in step 3)
+tunnel: <TUNNEL-ID>
+credentials-file: C:\Users\YOU\.cloudflared\<TUNNEL-ID>.json
+ingress:
+  - hostname: vanguard.yourdomain.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404
+
+# 5. Install as a Windows service (runs at boot, no login required)
+cloudflared service install
+
+# 6. Start
+net start cloudflared
+```
+
+Your app is now reachable at `https://vanguard.yourdomain.com`.
+
+> **No code changes to the app are needed** — Cloudflare Tunnel forwards HTTPS
+> traffic straight to the local FastAPI server.
+
+### 4 — IFTTT voice trigger (inbound)
+
+1. Create a new **Applet** in IFTTT.
+2. **If**: Google Assistant → "Say a specific phrase" → `run Vanguard report`
+3. **Then**: Webhooks → Make a web request
+   - URL: `https://vanguard.yourdomain.com/api/trigger`
+   - Method: `POST`
+   - Content Type: `application/json`
+   - Body: `{}`
+   - Headers: `x-api-key: your-long-random-secret`
+
+The collector runs, anomaly detection fires, and if an anomaly is found your
+Google Home device speaks the summary aloud.
+
+### 5 — Dashboard / TTS outbound summary
+
+`GET /api/summary/latest` returns a JSON body with a `plain_text` field:
+
+```
+"Vanguard report: 14 network connections, 2 new IPs not seen before, no crashes detected"
+```
+
+This endpoint can be polled by Home Assistant, Node-RED, or any automation
+platform to drive outbound TTS on a schedule.
