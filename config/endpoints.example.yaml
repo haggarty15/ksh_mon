@@ -3,7 +3,7 @@ version: 1
 targets:
   game_endpoints:
     - name: valorant-us-central
-      host: 192.207.0.0
+      host: 198.51.100.10
       protocol: icmp
       interval_seconds: 5
     - name: steam-cdn
