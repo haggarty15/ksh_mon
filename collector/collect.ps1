@@ -505,11 +505,11 @@ if ($ApiBaseUrl -ne "") {
     try {
         $uri = "$ApiBaseUrl/api/ingest"
         Write-Log "POSTing events to $uri ..."
-        $ingestHeaders = @{ "Content-Type" = "application/json" }
+        $headers = @{ "Content-Type" = "application/json" }
         if ($ApiKey -ne "") {
-            $ingestHeaders["x-api-key"] = $ApiKey
+            $headers["x-api-key"] = $ApiKey
         }
-        $response = Invoke-RestMethod -Uri $uri -Method POST -Body $json -Headers $ingestHeaders
+        $response = Invoke-RestMethod -Uri $uri -Method POST -Body $json -Headers $headers
         Write-Log "Ingest response: $($response | ConvertTo-Json -Compress)"
     } catch {
         Write-Log "Failed to POST events to API: $_" "WARN"

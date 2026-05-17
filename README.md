@@ -184,6 +184,75 @@ schtasks /Run /TN "VanguardMonitor\DailyCollect"
 
 ---
 
+## Cloud Deployment
+
+The PowerShell collector must run on a Windows machine because it reads the
+Windows Event Log and live network connections.  Everything else — the FastAPI
+backend and the HTML dashboard — can be hosted in the cloud while the collector
+**POSTs** data directly to the public endpoint.
+
+```
+Windows machine                     Cloud (Render / Docker / any PaaS)
+──────────────────                  ──────────────────────────────────
+collect.ps1                ──POST /api/ingest──►  FastAPI + SQLite
+  -ApiBaseUrl https://…              (serves dashboard at /)
+  -ApiKey     <secret>
+```
+
+### Quick start with Render (recommended)
+
+1. Fork or push this repo to GitHub.
+2. Sign in at [render.com](https://render.com) → **New → Blueprint** → select
+   your repo.  Render reads `render.yaml` automatically.
+3. After deploy, note the generated `VANGUARD_API_KEY` in the service
+   **Environment** tab — you'll need it for the collector.
+4. On your Windows machine, schedule `collect.ps1` with the cloud URL and key:
+
+```powershell
+powershell -File collector\collect.ps1 `
+    -ApiBaseUrl https://<your-service>.onrender.com `
+    -ApiKey     <VANGUARD_API_KEY>
+```
+
+> **Persistent storage** — `render.yaml` attaches a 1 GB disk at
+> `/opt/render/project/data` so the SQLite database survives redeployments.
+
+### Quick start with Docker
+
+```bash
+# 1. Build the image
+docker build -t ksh-mon .
+
+# 2. Run (replace the key with a strong random secret)
+VANGUARD_API_KEY=my-secret docker compose up -d
+```
+
+The dashboard is then available at **http://localhost:8000**.
+
+Point `collect.ps1` at `http://localhost:8000` with `-ApiKey my-secret`.
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `VANGUARD_API_KEY` | *(empty)* | Shared secret required on all API calls when set |
+| `CLOUD_MODE` | `0` | Set to `1` in the cloud; disables `/api/trigger` |
+| `VANGUARD_DB_PATH` | `data/vanguard_monitor.db` | Absolute path to the SQLite database |
+| `PORT` | `8000` | Listening port (auto-set by Render / Railway / Fly) |
+
+Copy `.env.example` to `.env` and fill in values for local Docker runs.
+
+### Hardening checklist
+
+- **Always set `VANGUARD_API_KEY`** when the server is reachable from the internet.
+  All API endpoints (including `/api/ingest`) require the `x-api-key` header when a
+  key is configured.
+- **HTTPS** — Render and most PaaS platforms terminate TLS automatically.  For
+  self-hosted Docker, put the container behind an nginx/Caddy reverse proxy.
+- **Firewall** — if you use a VPS, restrict inbound traffic to port 443/80 only.
+
+---
+
 ## Notes
 
 - **Local-only mode** — leave `api_key` empty in `config.json` and no auth is required. Do not expose the server to the network without setting a key.

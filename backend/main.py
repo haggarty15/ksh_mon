@@ -140,7 +140,8 @@ async def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
 # API routes
 # ---------------------------------------------------------------------------
 
-@app.post("/api/ingest", summary="Ingest events from PowerShell collector")
+@app.post("/api/ingest", summary="Ingest events from PowerShell collector",
+          dependencies=[Depends(verify_api_key)])
 async def ingest(payload: IngestPayload):
     events = [ev.to_flat_dict() for ev in payload.events]
     count = await insert_events(events)

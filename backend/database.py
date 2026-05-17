@@ -41,7 +41,18 @@ CREATE TABLE IF NOT EXISTS settings (
 
 
 async def get_db_path() -> Path:
-    """Return the DB path from config.json, resolving relative to the repo root."""
+    """Return the DB path, resolved in priority order:
+
+    1. ``VANGUARD_DB_PATH`` environment variable (useful for containers / cloud).
+    2. ``db_path`` field in ``config.json``, resolved relative to the repo root.
+    3. Fallback: ``data/vanguard_monitor.db`` next to the repo root.
+    """
+    env_path = os.environ.get("VANGUARD_DB_PATH", "")
+    if env_path:
+        db_path = Path(env_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return db_path
+
     repo_root = Path(__file__).resolve().parent.parent
     config_path = repo_root / "config.json"
     if config_path.exists():
