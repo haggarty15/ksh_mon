@@ -52,6 +52,7 @@ async def _init_test_db():
     # Drop and recreate tables
     async with aiosqlite.connect(_TMP_DB) as conn:
         await conn.execute("DROP TABLE IF EXISTS events")
+        await conn.execute("DROP TABLE IF EXISTS settings")
         await conn.commit()
 
     await db_module.init_db(db_path=Path(_TMP_DB))
@@ -368,11 +369,12 @@ async def test_trigger_correct_api_key_passes_auth(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_trigger_returns_501_in_cloud_mode(client: AsyncClient):
-    """In CLOUD_MODE the /api/trigger endpoint must return 501."""
+    """In CLOUD_MODE the /api/trigger endpoint queues the trigger (200, not 501)."""
     os.environ["CLOUD_MODE"] = "1"
     try:
         resp = await client.post("/api/trigger")
-        assert resp.status_code == 501
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "queued"
     finally:
         os.environ.pop("CLOUD_MODE", None)
 
@@ -695,3 +697,124 @@ async def test_detect_anomalies_known_ip_not_flagged():
     result = await detect_anomalies(cfg, db_path=Path(_TMP_DB))
     assert not result.is_anomaly
     assert result.new_ips == []
+
+
+# ---------------------------------------------------------------------------
+# Tests – /api/trigger cloud-mode queue + /api/trigger/pending
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_trigger_cloud_mode_returns_queued(authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """In CLOUD_MODE, POST /api/trigger should return 200 with status='queued'."""
+    monkeypatch.setenv("CLOUD_MODE", "1")
+    resp = await authed_client.post("/api/trigger")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert "queued" in body["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_trigger_cloud_mode_sets_pending_flag(authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """After a cloud-mode trigger, the pending flag should be set in the DB."""
+    monkeypatch.setenv("CLOUD_MODE", "1")
+    await authed_client.post("/api/trigger")
+    pending = await db_module.get_and_clear_trigger_pending(db_path=Path(_TMP_DB))
+    assert pending is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_pending_false_when_nothing_queued(authed_client: AsyncClient):
+    """GET /api/trigger/pending returns false when no trigger has been queued."""
+    resp = await authed_client.get("/api/trigger/pending")
+    assert resp.status_code == 200
+    assert resp.json()["pending"] is False
+
+
+@pytest.mark.asyncio
+async def test_trigger_pending_true_after_cloud_trigger(authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """GET /api/trigger/pending returns true after a cloud-mode trigger."""
+    monkeypatch.setenv("CLOUD_MODE", "1")
+    await authed_client.post("/api/trigger")
+    resp = await authed_client.get("/api/trigger/pending")
+    assert resp.status_code == 200
+    assert resp.json()["pending"] is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_pending_clears_on_read(authed_client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """GET /api/trigger/pending clears the flag — second call returns false."""
+    monkeypatch.setenv("CLOUD_MODE", "1")
+    await authed_client.post("/api/trigger")
+    first  = await authed_client.get("/api/trigger/pending")
+    second = await authed_client.get("/api/trigger/pending")
+    assert first.json()["pending"] is True
+    assert second.json()["pending"] is False
+
+
+@pytest.mark.asyncio
+async def test_trigger_pending_requires_auth(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """GET /api/trigger/pending returns 403 when the API key is configured but missing."""
+    monkeypatch.setenv("VANGUARD_API_KEY", "secret123")
+    resp = await client.get("/api/trigger/pending")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_cloud_mode_requires_auth(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """POST /api/trigger in cloud mode still returns 403 with a wrong key."""
+    monkeypatch.setenv("CLOUD_MODE", "1")
+    monkeypatch.setenv("VANGUARD_API_KEY", "secret123")
+    resp = await client.post("/api/trigger", headers={"x-api-key": "wrong"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_trigger_non_cloud_mode_unaffected(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    """Without CLOUD_MODE, /api/trigger still attempts to run PowerShell (non-403)."""
+    monkeypatch.delenv("CLOUD_MODE", raising=False)
+    monkeypatch.delenv("VANGUARD_API_KEY", raising=False)
+    resp = await client.post("/api/trigger")
+    # Auth is not required (no key configured); PowerShell may not be present
+    # in CI but we must NOT get a queued response or 403.
+    assert resp.status_code != 403
+    if resp.status_code == 200:
+        assert resp.json().get("status") != "queued"
+
+
+# ---------------------------------------------------------------------------
+# Tests – set_trigger_pending / get_and_clear_trigger_pending (DB layer)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_and_get_trigger_pending():
+    """set_trigger_pending followed by get_and_clear_trigger_pending returns True."""
+    await db_module.set_trigger_pending(db_path=Path(_TMP_DB))
+    result = await db_module.get_and_clear_trigger_pending(db_path=Path(_TMP_DB))
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_get_trigger_pending_false_when_not_set():
+    """get_and_clear_trigger_pending returns False when the flag was never set."""
+    result = await db_module.get_and_clear_trigger_pending(db_path=Path(_TMP_DB))
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_get_trigger_pending_clears_flag():
+    """The flag is cleared after a single consume-on-read call."""
+    await db_module.set_trigger_pending(db_path=Path(_TMP_DB))
+    first  = await db_module.get_and_clear_trigger_pending(db_path=Path(_TMP_DB))
+    second = await db_module.get_and_clear_trigger_pending(db_path=Path(_TMP_DB))
+    assert first  is True
+    assert second is False
+
+
+@pytest.mark.asyncio
+async def test_set_trigger_pending_idempotent():
+    """Calling set_trigger_pending twice still results in a single True read."""
+    await db_module.set_trigger_pending(db_path=Path(_TMP_DB))
+    await db_module.set_trigger_pending(db_path=Path(_TMP_DB))
+    result = await db_module.get_and_clear_trigger_pending(db_path=Path(_TMP_DB))
+    assert result is True

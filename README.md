@@ -150,7 +150,8 @@ ksh_mon/
 | `GET` | `/api/events` | Query stored events (`event_type`, `date`, `limit`, `offset`) | No |
 | `GET` | `/api/dates` | List dates that have events | No |
 | `GET` | `/api/counts` | Event counts per type (optional `date` filter) | No |
-| `POST` | `/api/trigger` | Trigger the PowerShell collector on-demand; runs anomaly detection afterwards | If key set |
+| `POST` | `/api/trigger` | Run collector on-demand (local mode) or queue a trigger for the Windows collector to pick up (cloud mode — `CLOUD_MODE=1`) | If key set |
+| `GET` | `/api/trigger/pending` | Check and consume the pending-trigger flag (used by Windows collector in poll mode) | If key set |
 | `GET` | `/api/summary/latest` | Last 24 h digest as plain text (for TTS / IFTTT) | If key set |
 
 Interactive docs: **http://127.0.0.1:8000/docs**
@@ -366,12 +367,41 @@ Your app is now reachable at `https://vanguard.yourdomain.com`.
    - Body: `{}`
    - Headers: `x-api-key: your-long-random-secret`
 
-The collector runs, anomaly detection fires, and your Google Home can now speak:
+**Cloud mode behaviour:** when the server is hosted on a Linux cloud machine
+(i.e. `CLOUD_MODE=1`), it cannot run PowerShell locally.  Instead of failing,
+`POST /api/trigger` **queues** the trigger in the database and returns
+`{"status": "queued", ...}`.  Your Windows machine picks it up within ~30 s
+(see step 5 below).  The IFTTT applet configuration is identical either way.
 
-- an anomaly alert (when anomaly is found), or
-- a "run complete" summary (when no anomaly is found and `announce_summary_on_trigger` is true).
+### 5 — Windows collector poll mode (required for cloud hosting)
 
-### 5 — Dashboard / TTS outbound summary
+When your FastAPI server is running in the cloud rather than locally on Windows,
+start a long-lived poll loop on your Windows machine so it can receive remote
+triggers:
+
+```powershell
+# Run once at login (or register as a Task Scheduler task)
+powershell -File collector\collect.ps1 `
+    -ApiBaseUrl https://vanguard.yourdomain.com `
+    -ApiKey     your-long-random-secret `
+    -PollMode
+```
+
+The collector checks `GET /api/trigger/pending` every 30 seconds.  When a
+voice trigger arrives (step 4), the flag is set; on the next poll the collector
+runs a full collection, POSTs the results to `/api/ingest`, and the server
+performs anomaly detection and speaks the result on your Google Home.
+
+**To register as a Task Scheduler task** (starts automatically at logon):
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NonInteractive -NoProfile -File `"$PWD\collector\collect.ps1`" -ApiBaseUrl https://vanguard.yourdomain.com -ApiKey your-long-random-secret -PollMode"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "VanguardMonitor\PollMode" -Action $action -Trigger $trigger -RunLevel Highest -Force
+```
+
+### 6 — Dashboard / TTS outbound summary
 
 `GET /api/summary/latest` returns a JSON body with a `plain_text` field:
 

@@ -78,6 +78,10 @@ class TriggerResponse(BaseModel):
     tts_message: str = ""
 
 
+class TriggerPendingResponse(BaseModel):
+    pending: bool
+
+
 class SummaryResponse(BaseModel):
     plain_text: str
     network_count: int

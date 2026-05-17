@@ -14,13 +14,25 @@
 
 .PARAMETER ApiBaseUrl
     Base URL of the running FastAPI backend. If provided, events are POSTed to it.
-    Example: http://127.0.0.1:8000
+    Example: https://vanguard.yourdomain.com
+
+.PARAMETER ApiKey
+    API key to include as the x-api-key header when calling the backend.
+    Required when VANGUARD_API_KEY (or api_key in config.json) is set on the server.
+
+.PARAMETER PollMode
+    When set, the script runs as a long-lived poller instead of a one-shot
+    collector.  It checks GET /api/trigger/pending every 30 seconds and runs a
+    full collection whenever the flag is set (i.e. when a remote trigger — e.g.
+    a Google Home voice action via IFTTT — has been received by the cloud server).
+    Requires -ApiBaseUrl and -ApiKey to be set.
 #>
 
 param(
     [string]$ConfigPath = "$PSScriptRoot\..\config.json",
     [string]$ApiBaseUrl = "",
-    [string]$ApiKey = ""
+    [string]$ApiKey     = "",
+    [switch]$PollMode
 )
 
 Set-StrictMode -Version Latest
@@ -407,6 +419,49 @@ function Get-ExplorerCrashes {
 
     Write-Log "Collected $($crashes.Count) Explorer crash events."
     return $crashes
+}
+
+# ---------------------------------------------------------------------------
+# Poll mode — long-lived loop for remote-trigger support
+# ---------------------------------------------------------------------------
+
+if ($PollMode) {
+    if ($ApiBaseUrl -eq "") {
+        Write-Log "-PollMode requires -ApiBaseUrl to be set." "ERROR"
+        exit 1
+    }
+
+    $pollHeaders = @{}
+    if ($ApiKey -ne "") {
+        $pollHeaders["x-api-key"] = $ApiKey
+    }
+
+    Write-Log "=== Poll mode started. Checking $ApiBaseUrl/api/trigger/pending every 30 s ==="
+
+    while ($true) {
+        try {
+            $pendingUri  = "$ApiBaseUrl/api/trigger/pending"
+            $pendingResp = Invoke-RestMethod -Uri $pendingUri -Method GET -Headers $pollHeaders -ErrorAction Stop
+            if ($pendingResp.pending) {
+                Write-Log "Remote trigger received — running collection now..."
+                # Re-invoke this script in one-shot mode, forwarding all parameters
+                # except -PollMode so the same ConfigPath/ApiBaseUrl/ApiKey are used.
+                $forwardParams = @{}
+                foreach ($key in $PSBoundParameters.Keys) {
+                    if ($key -ne "PollMode") {
+                        $forwardParams[$key] = $PSBoundParameters[$key]
+                    }
+                }
+                & $PSCommandPath @forwardParams
+            }
+        } catch {
+            Write-Log "Failed to check trigger/pending: $_" "WARN"
+        }
+        Start-Sleep -Seconds 30
+    }
+
+    # unreachable, but satisfies strict mode
+    exit 0
 }
 
 # ---------------------------------------------------------------------------

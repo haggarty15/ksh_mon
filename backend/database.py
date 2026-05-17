@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_type      ON events (event_type);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events (timestamp);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -261,3 +266,36 @@ async def get_baseline_ips(days_back: int = 7, db_path: Path | None = None) -> s
             rows = await cursor.fetchall()
 
     return {row[0] for row in rows if row[0]}
+
+
+async def set_trigger_pending(db_path: Path | None = None) -> None:
+    """Set the trigger_pending flag so the Windows collector picks it up."""
+    path = db_path or await get_db_path()
+    async with aiosqlite.connect(path) as db:
+        await db.execute(
+            "INSERT INTO settings (key, value) VALUES ('trigger_pending', '1') "
+            "ON CONFLICT(key) DO UPDATE SET value='1'"
+        )
+        await db.commit()
+
+
+async def get_and_clear_trigger_pending(db_path: Path | None = None) -> bool:
+    """
+    Atomically read and clear the trigger_pending flag.
+
+    Returns ``True`` if a remote trigger was queued, ``False`` otherwise.
+    The flag is cleared on read (consume-on-read semantics).
+    """
+    path = db_path or await get_db_path()
+    async with aiosqlite.connect(path) as db:
+        async with db.execute(
+            "SELECT value FROM settings WHERE key='trigger_pending'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        pending = row is not None and row[0] == "1"
+        if pending:
+            await db.execute(
+                "UPDATE settings SET value='0' WHERE key='trigger_pending'"
+            )
+            await db.commit()
+    return pending
